@@ -49,7 +49,7 @@ you can also send structured information.
 
 ## Other Resources
 
-- [CI/CD](https://monkeyci.com)
+- [CI/CD](https://app.monkeyci.com/c/9eda9831-ea92-4a6c-95db-17bb9c9b2ab2/r/zmq)
 
 ## License
 
