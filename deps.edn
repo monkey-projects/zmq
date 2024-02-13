@@ -15,5 +15,22 @@
   :jeromq
   {:override-deps
    {org.zeromq/cljzmq {:mvn/version "0.1.4"
-                       :exclusions [org.zeromq/jzmq]}
-    org.zeromq/jeromq {:mvn/version "0.5.4"}}}}}
+                       :exclusions [org.zeromq/jzmq]}}
+   :extra-deps 
+   {org.zeromq/jeromq {:mvn/version "0.5.4"}}}
+
+  :test
+  {:extra-deps {com.monkeyprojects/build {:mvn/version "0.2.0"}}}
+
+  :junit
+  {:exec-fn monkey.test/junit}
+
+  :jar
+  {:extra-deps {com.monkeyprojects/build {:mvn/version "0.2.0"}}
+   :exec-args {:jar "target/monkey-zmq.jar"
+               :lib com.monkeyprojects/zmq
+               :version-env "LIB_VERSION"}
+   :exec-fn monkey.build/jar}
+
+  :publish
+  {:exec-fn monkey.build/jar+deploy}}}
