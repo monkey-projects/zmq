@@ -13,7 +13,8 @@ Include it in your project `deps.edn`:
 ```
 Or with Leiningen:
 ```clojure
-:dependencies [[com.monkeyprojects/zmq "<VERSION>"]]
+(defproject ...
+ :dependencies [[com.monkeyprojects/zmq "<VERSION>"]])
 ```
 
 The clients and servers are grouped in namespaces.  See `monkey.zmq.req` for
