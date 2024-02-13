@@ -1,0 +1,19 @@
+;; Note that when using zeromq natively, you'll need to manually build and install the
+;; jzmq JNI library.  Otherwise use the :jeromq alias.
+{:deps {byte-streams/byte-streams {:mvn/version "0.2.5-alpha2"}
+        com.stuartsierra/component {:mvn/version "1.1.0"}
+        org.zeromq/cljzmq {:mvn/version "0.1.4"}
+        org.slf4j/slf4j-api {:mvn/version "2.1.0-alpha1"}}
+ 
+ :aliases
+ {:dev
+  {:extra-deps {ch.qos.logback/logback-classic {:mvn/version "1.4.14"}}
+   :extra-paths ["env/dev"]
+   :jvm-opts ["-Djava.library.path=/usr/local/lib"]}
+  
+  :jeromq
+  {:override-deps
+   {org.zeromq/cljzmq {:mvn/version "0.1.4"
+                       ;; Use jeromq, cause native lib not found
+                       :exclusions [org.zeromq/jzmq]}
+    org.zeromq/jeromq {:mvn/version "0.5.4"}}}}}
