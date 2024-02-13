@@ -1,4 +1,6 @@
 (ns monkey.zmq.events
+  "Functionality for setting up an event server and poster.  This uses ZeroMQ's
+   push/pull socket types in the background."
   (:require [clojure.tools.logging :as log]
             [com.stuartsierra.component :as co]
             [monkey.zmq.common :as mc]

@@ -11,9 +11,9 @@
    :extra-paths ["env/dev"]
    :jvm-opts ["-Djava.library.path=/usr/local/lib"]}
   
+  ;; Use jeromq alias, in case there is no native lib
   :jeromq
   {:override-deps
    {org.zeromq/cljzmq {:mvn/version "0.1.4"
-                       ;; Use jeromq, cause native lib not found
                        :exclusions [org.zeromq/jzmq]}
     org.zeromq/jeromq {:mvn/version "0.5.4"}}}}}

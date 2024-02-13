@@ -62,3 +62,8 @@
   java.lang.AutoCloseable
   (close [_]
     (z/close socket)))
+
+(defn close-all
+  "Closes all closeable things in `cs`.  Returns true if they all return `nil`."
+  [cs]
+  (every? (comp nil? (memfn close)) cs))
