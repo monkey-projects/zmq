@@ -4,26 +4,17 @@
             [monkey.zmq.common :as mc]
             [zeromq.zmq :as z]))
 
-(defn event-server [ctx addr handler]
+(defn event-server [ctx addr handler & [opts]]
   (letfn [(receiver [s]
-            (let [[_ evt] (z/receive-all s)]
+            (let [evt (z/receive s)]
               (handler (mc/parse-edn evt))))]
-    (-> (mc/->Server ctx addr receiver :router)
+    (-> (mc/->Server ctx addr receiver :pull)
+        (merge opts)
         (co/start))))
-
-(defrecord EventPoster [socket]
-  clojure.lang.IFn
-  (invoke [_ evt]
-    (z/send-str socket (pr-str evt))
-    (log/debug "Event posted"))
-
-  java.lang.AutoCloseable
-  (close [_]
-    (z/close socket)))
 
 (defn event-poster
   "Creates an event poster that sends to the given address."
   [ctx addr]
-  (let [s (doto (z/socket ctx :dealer)
+  (let [s (doto (z/socket ctx :push)
             (z/connect addr))]
-    (->EventPoster s)))
+    (mc/->Client s #(z/send-str s (pr-str %2)))))

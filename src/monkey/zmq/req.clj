@@ -32,28 +32,22 @@
 
 (def request-timeout 5000)
 
-(defrecord Client [socket poller]
-  clojure.lang.IFn
-  (invoke [this req]
-    (log/debug "Sending request:" req)
-    (z/send-str socket (pr-str req))
-    (if (neg? (z/poll poller request-timeout))
-      (throw (ex-info "Request error"
-                      {:client this
-                       :request req}))
-      (if (z/check-poller poller 0 :pollin)
-        (let [r (-> (z/receive socket)
-                    (mc/parse-edn))]
-          (log/debug "Got reply:" r)
-          r)
-        (throw (ex-info "Request timeout"
-                        {:timeout request-timeout
-                         :client this
-                         :request req})))))
-  
-  java.lang.AutoCloseable
-  (close [_]
-    (z/close socket)))
+(defn- send-request [poller {:keys [socket] :as this} req]
+  (log/debug "Sending request:" req)
+  (z/send-str socket (pr-str req))
+  (if (neg? (z/poll poller request-timeout))
+    (throw (ex-info "Request error"
+                    {:client this
+                     :request req}))
+    (if (z/check-poller poller 0 :pollin)
+      (let [r (-> (z/receive socket)
+                  (mc/parse-edn))]
+        (log/debug "Got reply:" r)
+        r)
+      (throw (ex-info "Request timeout"
+                      {:timeout request-timeout
+                       :client this
+                       :request req})))))
 
 (defn client
   "Creates a synchronous client for the given destination.  Returns a client 
@@ -66,4 +60,4 @@
         poller (doto (z/poller ctx 1)
                  (z/register s :pollin))]
     (log/info "Connected to" dest)
-    (->Client s poller)))
+    (mc/->Client s (partial send-request poller))))

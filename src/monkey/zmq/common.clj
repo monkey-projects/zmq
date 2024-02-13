@@ -10,12 +10,11 @@
   (with-open [r (PushbackReader. (bs/to-reader v))]
     (edn/read r)))
 
-(def poll-timeout 500)
-
 (defn- run-sync-server
   "Runs a generic synchronous server.  It creates a socket of given type, binds it to the
    address and invokes the receiver when there is incoming data."
-  [{:keys [context address receiver socket-type running?]}]
+  [{:keys [context address receiver socket-type running? poll-timeout]
+    :or {poll-timeout 500}}]
   ;; Sockets are not thread save so we must use them in the same thread
   ;; where we create them.
   (let [socket (doto (z/socket context socket-type)
@@ -23,6 +22,7 @@
         poller (doto (z/poller context 1)
                  (z/register socket :pollin))]
     (try
+      (reset! running? true)
       (while (and @running?
                   (not (.. Thread currentThread isInterrupted)))
         (z/poll poller poll-timeout)
@@ -40,15 +40,25 @@
   co/Lifecycle
   (start [this]
     (log/info "Starting server at" address)
-    (let [t (assoc this :running? (atom true))]
+    (let [t (assoc this :running? (atom false))]
       (assoc t :thread (doto (Thread. #(run-sync-server t))
                          (.start)))))
   
   (stop [{:keys [thread running?] :as this}]
     (when thread
       (reset! running? false)
-      (.interrupt thread)))
+      (.interrupt thread)
+      (.join thread)))
 
   java.lang.AutoCloseable
   (close [this]
     (co/stop this)))
+
+(defrecord Client [socket sender]
+  clojure.lang.IFn
+  (invoke [this msg]
+    (sender this msg))
+
+  java.lang.AutoCloseable
+  (close [_]
+    (z/close socket)))
