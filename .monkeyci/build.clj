@@ -8,7 +8,7 @@
 
 (defn clj-test [ctx]
   (-> (clj/clj-deps ctx {} "-X:jeromq:test:junit")
-      (update :script concat ["ls -l", (format "echo 'm2 dir: %s'" (s/in-work ctx ".m2"))])))
+      (assoc :script ["clojure -Sdeps '{:mvn/local-repo \".m2\"}' -X:jeromq:test:junit"])))
 
 (bc/defpipeline run-tests
   [clj-test])
