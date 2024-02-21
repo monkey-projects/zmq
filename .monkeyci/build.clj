@@ -10,5 +10,5 @@
   (-> (clj/clj-deps ctx {} "-X:jeromq:test:junit")
       (update :script concat ["ls -l", (format "echo 'm2 dir: %s'" (s/in-work ctx ".m2"))])))
 
-(bd/defpipeline run-tests
+(bc/defpipeline run-tests
   [clj-test])
