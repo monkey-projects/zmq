@@ -24,6 +24,8 @@ or stopped.  The server will start a background thread that invokes the specifie
 on incoming data.  The client functions return an `AutoCloseable` object that is also
 a function.
 
+### Request/Reply
+
 ```clojure
 (require '[monkey.zmq.req :as r])
 (require '[zeromq.zmq :as z])
@@ -46,6 +48,74 @@ a function.
 
 The communication is always serialized to [EDN](https://github.com/edn-format/edn), so
 you can also send structured information.
+
+### Passive Events
+
+The `monkey.zmq.events` namespace provides two kinds of event handling systems.  One is
+a simple event server that only passively receives events, and dispatches them to a
+`handler` function.  The other is a more complicated (and useful) event broker that
+is both able to receive and send out events.
+
+To create the passive event server and client:
+```clojure
+(require '[monkey.zmq.events :as e])
+(require '[zeromq.zmq :as z])
+
+(def ctx (z/context 1))
+(def addr "inproc://passive-events")
+
+;; Create and start server
+(def server (e/event-server ctx addr println))
+;; A client
+(def client (e/event-poster ctx addr))
+;; The client is a component that implements IFn and Autoclosable so you can
+;; invoke it like this:
+(client {:type :test-event :message "this is a test event"})
+
+;; The server should now print out the event
+
+;; Shut down
+(.close client)
+(.close server)
+```
+
+### Bidirectional Event Broker
+
+A more useful event broker is also available in the events namespace.  It listens on an
+endpoint (multiple endpoints coming later) and dispatches any events it receives to all
+connected clients.  Clients must register with a filter in order to receive events.  How
+this filter looks and how it's handled is completely up to you.  When starting the server
+you need to specify a `matches-filter?` predicate that is passed an event and a filter.
+It decides whether a client that is registered with a given filter is allowd to receive
+the event.  By default, all events are allowed.
+
+```clojure
+(def addr "inproc://event-broker")
+
+;; Start broker
+(def broker (e/broker-server ctx addr {:matches-filter? (fn [evt evt-filter]
+                                                          (= (:type evt) evt-filter))}))
+;; Create a client and register it
+(def client (e/broker-client ctx addr println))
+(e/register client :test-event)
+
+(client {:type :test-event :message "Should receive this"})
+(client {:type :other-event :message "Should not receive this"})
+```
+
+This setup gives the user a lot of flexibility on how to filter events without sending
+too much data to the clients and burdening them with their own filtering.  The only
+condition is that the filter is serializable.  You could event use `eval` and allow
+the client to send Clojure code as an event filter!  Whether that is a safe solution,
+I'll leave that up to you to decide.
+
+## TODO
+
+Things that need to be implemented:
+
+ - Allow event brokers to listen on multiple endpoints (e.g. `tcp` and `inproc`).
+ - Implement a ping system to unregister any dead clients.
+ - Make sure that events that match multiple filters for the same client only get sent once.
 
 ## Other Resources
 
