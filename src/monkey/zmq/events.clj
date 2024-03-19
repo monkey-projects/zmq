@@ -30,6 +30,62 @@
 (def req-register 1)
 (def req-unregister 2)
 
+(defn register-client
+  "Registers a new client with filter in the state.  The client is identified by the
+   socket and its id."
+  [state sock id evt-filter _]
+  (log/info "Registering client" id "for filter" evt-filter)
+  (update-in state [:listeners evt-filter sock] (fnil conj #{}) id))
+
+(defn unregister-client
+  "Removes a client registration from the filter.  It removes the id from the
+   registrations for the same filter."
+  [state sock id evt-filter _]
+  (log/info "Unregistering client" id "for filter" evt-filter)
+  (update-in state [:listeners evt-filter sock] disj id))
+
+(defn dispatch-event [matches-filter? state sock id evt raw]
+  (log/info "Dispatching event from" id ":" evt)
+  ;; Find all socket/id pairs where the event matches the filter
+  (let [socket-ids (->> (:listeners state)
+                        (filter (comp (partial matches-filter? evt) first))
+                        (map second))]
+    (log/debug "Found" (count socket-ids) "matching socket/ids pairs")
+    ;; TODO Eliminate duplicates (from multiple matching filters)
+    (update state :events (fnil conj []) [raw socket-ids])))
+
+(defn- handle-incoming
+  "Handles incoming request on the broker"
+  [state req-handlers sock]
+  (let [[id req payload] (z/receive-all sock)]
+    (let [id (String. id)
+          parsed (mc/parse-edn payload)
+          req (aget req 0)
+          h (get req-handlers req)]
+      (log/debug "Handling incoming request from id" id ":" req)
+      (if h
+        (h state sock id parsed payload)
+        (do
+          (log/warn "Got invalid request type:" req)
+          state)))))
+
+(defn post-pending
+  "Posts pending events in the state to the specified socket/client id."
+  [state]
+  (let [{:keys [events]} state]
+    (when (not-empty events)
+      (log/debug "Posting" (count events) "outgoing events")
+      (doseq [[e dest] events]
+        (doseq [sock-ids dest]
+          (log/debug "Posting to:" (vals sock-ids))
+          (doseq [[sock ids] sock-ids]
+            ;; TODO Only send when socket is able to process the event
+            (doseq [id ids]
+              (z/send-str sock id z/send-more)
+              ;; Event is raw payload
+              (z/send sock e))))))
+    (dissoc state :events)))
+
 (defn- run-broker-server [{:keys [context address running? poll-timeout matches-filter?]
                            :or {poll-timeout 500}}]
   ;; TODO Add support for multiple addresses (e.g. tcp and inproc)
@@ -39,70 +95,16 @@
                  (z/register socket :pollin))
         matches-filter? (or matches-filter? (constantly true))
 
-        register-client
-        ;; Adds client with filter to state
-        (fn [state sock id evt-filter _]
-          (log/info "Registering client" id "for filter" evt-filter)
-          (update-in state [:listeners evt-filter sock] (fnil conj #{}) id))
-        
-        unregister-client
-        ;; Removes the client from state
-        (fn [state sock id evt-filter _]
-          (log/info "Unregistering client" id "for filter" evt-filter)
-          (update-in state [:listeners evt-filter sock] disj id))
-
-        dispatch-event
-        ;; Dispatches event to all interested clients
-        (fn [state sock id evt raw]
-          (log/info "Dispatching event from" id ":" evt)
-          ;; Find all socket/id pairs where the event matches the filter
-          (let [socket-ids (->> (:listeners state)
-                                (filter (comp (partial matches-filter? evt) first))
-                                (map second))]
-            (log/debug "Found" (count socket-ids) "matching socket/ids pairs")
-            ;; TODO Eliminate duplicates (from multiple matching filters)
-            (update state :events (fnil conj []) [raw socket-ids])))
-
-        req-handlers {req-event dispatch-event
+        req-handlers {req-event (partial dispatch-event matches-filter?)
                       req-register register-client
                       req-unregister unregister-client}
-
-        handle-incoming
-        (fn [state sock]
-          (let [[id req payload] (z/receive-all sock)]
-            (let [id (String. id)
-                  parsed (mc/parse-edn payload)
-                  req (aget req 0)
-                  h (get req-handlers req)]
-              (log/debug "Handling incoming request from id" id ":" req)
-              (if h
-                (h state sock id parsed payload)
-                (do
-                  (log/warn "Got invalid request type:" req)
-                  state)))))
-
-        post-pending
-        (fn [state]
-          (let [{:keys [events]} state]
-            (when (not-empty events)
-              (log/debug "Posting" (count events) "outgoing events")
-              (doseq [[e dest] events]
-                (doseq [sock-ids dest]
-                  (log/debug "Posting to:" (vals sock-ids))
-                  (doseq [[sock ids] sock-ids]
-                    ;; TODO Only send when socket is able to process the event
-                    (doseq [id ids]
-                      (z/send-str sock id z/send-more)
-                      ;; Event is raw payload
-                      (z/send sock e))))))
-            (dissoc state :events)))
 
         recv-incoming
         (fn [state]
           (z/poll poller poll-timeout)
           (cond-> state
             (z/check-poller poller 0 :pollin)
-            (handle-incoming socket)))]
+            (handle-incoming req-handlers socket)))]
     (try
       (reset! running? true)
       ;; State keeps track of registered clients

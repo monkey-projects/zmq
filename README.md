@@ -79,6 +79,8 @@ To create the passive event server and client:
 (.close server)
 ```
 
+There is also a `close-all` utility function in `monkey.zmq.common` that closes all its args.
+
 ### Bidirectional Event Broker
 
 A more useful event broker is also available in the events namespace.  It listens on an
@@ -109,13 +111,25 @@ condition is that the filter is serializable.  You could event use `eval` and al
 the client to send Clojure code as an event filter!  Whether that is a safe solution,
 I'll leave that up to you to decide.
 
+#### Other Options
+
+Other options to pass to the broker client and server are:
+
+|---|---|---|
+|Option|Default|Description|
+|---|---|---|
+|`autostart?`|`true`|Will automatically [start](https://cljdoc.org/d/com.stuartsierra/component/1.1.0/api/com.stuartsierra.component#Lifecycle) the component.  If not, you'll have to start it yourself in order to enable the background thread.|
+|`poll-timeout`|`500`|Number of millisecs to wait for incoming data.|
+|---|---|---|
+
 ## TODO
 
-Things that need to be implemented:
+Things that still need to be implemented:
 
  - Allow event brokers to listen on multiple endpoints (e.g. `tcp` and `inproc`).
  - Implement a ping system to unregister any dead clients.
  - Make sure that events that match multiple filters for the same client only get sent once.
+ - When sending information, first check if the socket can actually handle it.
 
 ## Other Resources
 
