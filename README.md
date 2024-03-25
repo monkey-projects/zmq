@@ -120,6 +120,8 @@ Other options to pass to the broker client and server are:
 |---|---|---|
 |`autostart?`|`true`|Will automatically [start](https://cljdoc.org/d/com.stuartsierra/component/1.1.0/api/com.stuartsierra.component#Lifecycle) the component.  If not, you'll have to start it yourself in order to enable the background thread.|
 |`poll-timeout`|`500`|Number of millisecs to wait for incoming data.|
+|`linger`|`0`|When closing the context, will block for this number of msecs to ensure all data is sent.  See also the [ZeroMQ documentation about lingering](http://zeromq.github.io/cljzmq/zeromq.zmq.html#var-set-linger).|
+|`close-context?`|`false`|When true, the context passed in will also be closed when shutting down the component.|
 |---|---|---|
 
 ## TODO

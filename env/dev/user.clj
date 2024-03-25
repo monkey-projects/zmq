@@ -22,3 +22,14 @@
 
 (defn poster []
   (e/event-poster ctx events-addr))
+
+(def broker-port 3300)
+
+(defn broker-server []
+  (e/broker-server (z/context) (str "tcp://0.0.0.0:" broker-port)
+                   {:matches-event? (constantly true)}))
+
+(defn broker-client []
+  (let [c (e/broker-client (z/context) (str "tcp://127.0.0.1:" broker-port) println)]
+    (e/register c nil)
+    c))

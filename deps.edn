@@ -27,12 +27,18 @@
   :junit
   {:exec-fn monkey.test/junit}
 
+  :watch
+  {:exec-fn monkey.test/watch}
+
   :jar
   {:extra-deps {com.monkeyprojects/build {:mvn/version "0.2.0"}}
    :exec-args {:jar "target/monkey-zmq.jar"
                :lib com.monkeyprojects/zmq
                :version-env "LIB_VERSION"}
    :exec-fn monkey.build/jar}
+
+  :install
+  {:exec-fn monkey.build/jar+install}
 
   :publish
   {:exec-fn monkey.build/jar+deploy}}}

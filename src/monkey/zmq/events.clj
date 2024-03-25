@@ -29,6 +29,7 @@
 (def req-event 0)
 (def req-register 1)
 (def req-unregister 2)
+(def req-disconnect 3)
 
 (defn register-client
   "Registers a new client with filter in the state.  The client is identified by the
@@ -52,44 +53,67 @@
                         (map second))]
     (log/debug "Found" (count socket-ids) "matching socket/ids pairs")
     ;; TODO Eliminate duplicates (from multiple matching filters)
-    (update state :events (fnil conj []) [raw socket-ids])))
+    (update state :replies (fnil conj []) [[req-event raw] socket-ids])))
+
+(defn disconnect-client
+  "Handles client disconnect request, by removing it from all registrations.
+   A reply is sent back to the client to indicate the request was processed.
+   This allows clients to wait until it has been unregistered."
+  [state sock id _ _]
+  (letfn [(remove-from-socket [[f s]]
+            [f (update s sock disj id)])
+          (remove-from-filters [l]
+            (->> (map remove-from-socket l)
+                 (filter (comp empty? second))
+                 (into {})))]
+    (log/info "Disconnecting client" id)
+    (update state :listeners remove-from-filters)))
 
 (defn- handle-incoming
   "Handles incoming request on the broker"
   [state req-handlers sock]
   (let [[id req payload] (z/receive-all sock)]
-    (let [id (String. id)
-          parsed (mc/parse-edn payload)
-          req (aget req 0)
-          h (get req-handlers req)]
-      (log/debug "Handling incoming request from id" id ":" req)
-      (if h
-        (h state sock id parsed payload)
-        (do
-          (log/warn "Got invalid request type:" req)
-          state)))))
+    (try
+      (let [id (String. id)
+            parsed (mc/parse-edn payload)
+            req (aget req 0)
+            h (get req-handlers req)]
+        (log/debug "Handling incoming request from id" id ":" req)
+        (if h
+          (h state sock id parsed payload)
+          (do
+            (log/warn "Got invalid request type:" req)
+            state)))
+      (catch Exception ex
+        (log/error "Unable to handle incoming request.  Id: " id ", req:" req ", payload:" (String. payload))))))
 
 (defn post-pending
   "Posts pending events in the state to the specified socket/client id."
   [state]
-  (let [{:keys [events]} state]
-    (when (not-empty events)
-      (log/debug "Posting" (count events) "outgoing events")
-      (doseq [[e dest] events]
+  (let [{:keys [replies]} state]
+    (when (not-empty replies)
+      (log/debug "Posting" (count replies) "outgoing replies")
+      (doseq [[[req e] dest] replies]
         (doseq [sock-ids dest]
           (log/debug "Posting to:" (vals sock-ids))
           (doseq [[sock ids] sock-ids]
             ;; TODO Only send when socket is able to process the event
             (doseq [id ids]
               (z/send-str sock id z/send-more)
+              ;; Send request type
+              (z/send sock (byte-array 1 [req]) z/send-more)
               ;; Event is raw payload
               (z/send sock e))))))
-    (dissoc state :events)))
+    (dissoc state :replies)))
 
-(defn- run-broker-server [{:keys [context address running? poll-timeout matches-filter?]
-                           :or {poll-timeout 500}}]
+(defn- run-broker-server [{:keys [context address running? poll-timeout matches-filter? state-stream
+                                  linger close-context?]
+                           :or {poll-timeout 500
+                                linger 0
+                                close-context? false}}]
   ;; TODO Add support for multiple addresses (e.g. tcp and inproc)
   (let [socket (doto (z/socket context :router)
+                 (z/set-linger linger)
                  (z/bind address))
         poller (doto (z/poller context 1)
                  (z/register socket :pollin))
@@ -97,14 +121,20 @@
 
         req-handlers {req-event (partial dispatch-event matches-filter?)
                       req-register register-client
-                      req-unregister unregister-client}
+                      req-unregister unregister-client
+                      req-disconnect disconnect-client}
 
         recv-incoming
         (fn [state]
           (z/poll poller poll-timeout)
           (cond-> state
             (z/check-poller poller 0 :pollin)
-            (handle-incoming req-handlers socket)))]
+            (handle-incoming req-handlers socket)))
+
+        publish-state
+        (fn [state]
+          (ms/put! state-stream state)
+          state)]
     (try
       (reset! running? true)
       ;; State keeps track of registered clients
@@ -115,13 +145,16 @@
           (-> state
               (post-pending)
               (recv-incoming)
+              (publish-state)
               (recur))))
       (catch Exception ex
         (log/error "Server error:" ex))
       (finally
         (reset! running? false)
-        (z/set-linger socket 0)
-        (z/close socket)))
+        (z/close socket)
+        (ms/close! state-stream)
+        (when close-context?
+          (.close context))))
     (log/info "Server terminated")))
 
 (defrecord ThreadComponent [run-fn]
@@ -141,27 +174,33 @@
   (close [this]
     (co/stop this)))
 
+(defn- component-running? [{:keys [running?]}]
+  (true? (some-> running? deref)))
+
 (defn broker-server
   "Starts an event broker that can receive incoming events, but also dispatches outgoing
    events back to the clients.  Clients must register for events with a filter.  The filter
    is a user-defined object, that is matched against the events using the `matches-filter?`
-   option.  If no matcher is specified, all events are always matched."
+   option.  If no matcher is specified, all events are always matched.  The server also
+   provides a `state-stream` that holds the latest state, useful for metrics and inspection."
   [ctx addr & [{:keys [autostart?]
                 :as opts
                 :or {autostart? true}}]]
   (cond-> (map->ThreadComponent (assoc opts
                                        :context ctx
                                        :address addr
+                                       :state-stream (ms/sliding-stream 1)
                                        :run-fn run-broker-server))
     autostart? (co/start)))
 
 (defn- run-sync-client
-  [{:keys [id context address handler stream running? poll-timeout]
-    :or {poll-timeout 500}}]
+  [{:keys [id context address handler stream running? poll-timeout linger close-context?]
+    :or {poll-timeout 500 linger 0 close-context? false}}]
   ;; Sockets are not thread save so we must use them in the same thread
   ;; where we create them.
   (let [socket (doto (z/socket context :dealer)
                  (z/set-identity (.getBytes id))
+                 (z/set-linger linger)
                  (z/connect address))
         poller (doto (z/poller context 1)
                  (z/register socket :pollin))
@@ -177,37 +216,56 @@
         receive-evt
         (fn []
           (log/debug "Received events at" id)
-          (let [recv (z/receive socket)]
+          (let [[_ recv] (z/receive-all socket)]
+            ;; TODO Instead of passing all events to a single handler, allow a handler per
+            ;; registered event filter.  This would mean the broker will have to send back
+            ;; the filter (or some id?) that passed the event.
             (-> recv
                 (mc/parse-edn)
-                (handler))))]
+                (handler))))
+
+        check-running
+        (fn []
+          (and @running?
+               (not (.. Thread currentThread isInterrupted))))]
     (try
       (reset! running? true)
-      (while (and @running?
-                  (not (.. Thread currentThread isInterrupted)))
+      (loop [continue? (check-running)]
         ;; Send pending outgoing requests
         (loop [m (take-next)]
           (when m
             (send-request m)
             (recur (take-next))))
-        ;; Pass received events to the handler
+        ;; When stopped, add a disconnect request
+        (when (not continue?)
+          (log/debug "Sending disconnect request")
+          (ms/close! stream) ; Stop accepting more requests
+          (send-request [req-disconnect {}]))
+        ;; Check for incoming data
         (z/poll poller poll-timeout)
         (when (z/check-poller poller 0 :pollin)
-          (receive-evt)))
+          (receive-evt))
+        (when continue?
+          (recur (check-running))))
       (catch Exception ex
         (log/error "Socket error:" ex))
       (finally
         (reset! running? false)
-        (z/set-linger socket 0)
-        (z/close socket)))
+        (z/close socket)
+        (when close-context?
+          (.close context))))
     (log/info "Client" id "terminated")))
 
 (defn send-request
-  "Sends a raw request to the broker"
+  "Sends a raw request to the broker.  Returns a deferred that realizes when the request
+   has been accepted by the subsystem (not necessarily when it's transmitted)."
   [client req]
   (ms/put! (get-in client [:component :stream]) req))
 
-(defn post-event [client evt]
+(defn post-event
+  "Posts event, returns a deferred that realizes when the event has been accepted
+   by the background thread."
+  [client evt]
   (send-request client [req-event evt]))
 
 (defrecord BrokerClient [component]
@@ -222,8 +280,11 @@
                (co/start))))
   
   (stop [{:keys [component] :as this}]
-    (log/debug "Stopping client" (:id component))
-    (assoc this :component (co/stop component)))
+    (if (component-running? component)
+      (do 
+        (log/debug "Stopping client" (:id component))
+        (assoc this :component (co/stop component)))
+      this))
 
   clojure.lang.IFn
   (invoke [this evt]
