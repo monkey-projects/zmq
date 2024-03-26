@@ -106,15 +106,19 @@
               (z/send sock e))))))
     (dissoc state :replies)))
 
-(defn- run-broker-server [{:keys [context address running? poll-timeout matches-filter? state-stream
+(defn- run-broker-server [{:keys [context addresses running? poll-timeout matches-filter? state-stream
                                   linger close-context?]
                            :or {poll-timeout 500
                                 linger 0
                                 close-context? false}}]
-  ;; TODO Add support for multiple addresses (e.g. tcp and inproc)
-  (let [socket (doto (z/socket context :router)
+  ;; For backwards compatibility we support one or more addresses
+  (let [addresses (if (sequential? addresses) addresses [addresses])
+        bind-all (fn [s]
+                   (doseq [a addresses]
+                     (z/bind s a)))
+        socket (doto (z/socket context :router)
                  (z/set-linger linger)
-                 (z/bind address))
+                 (bind-all))
         poller (doto (z/poller context 1)
                  (z/register socket :pollin))
         matches-filter? (or matches-filter? (constantly true))
@@ -188,7 +192,7 @@
                 :or {autostart? true}}]]
   (cond-> (map->ThreadComponent (assoc opts
                                        :context ctx
-                                       :address addr
+                                       :addresses addr
                                        :state-stream (ms/sliding-stream 1)
                                        :run-fn run-broker-server))
     autostart? (co/start)))

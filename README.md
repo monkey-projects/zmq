@@ -95,8 +95,8 @@ the event.  By default, all events are allowed.
 (def addr "inproc://event-broker")
 
 ;; Start broker
-(def broker (e/broker-server ctx addr {:matches-filter? (fn [evt evt-filter]
-                                                          (= (:type evt) evt-filter))}))
+(def broker (e/broker-server ctx [addr] {:matches-filter? (fn [evt evt-filter]
+                                                            (= (:type evt) evt-filter))}))
 ;; Create a client and register it
 (def client (e/broker-client ctx addr println))
 (e/register client :test-event)
@@ -110,6 +110,9 @@ too much data to the clients and burdening them with their own filtering.  The o
 condition is that the filter is serializable.  You could event use `eval` and allow
 the client to send Clojure code as an event filter!  Whether that is a safe solution,
 I'll leave that up to you to decide.
+
+You can also have the broker listen on multiple addresses, just specify more than one in
+the second argument to `broker-server`.
 
 #### Other Options
 
@@ -128,7 +131,6 @@ Other options to pass to the broker client and server are:
 
 Things that still need to be implemented:
 
- - Allow event brokers to listen on multiple endpoints (e.g. `tcp` and `inproc`).
  - Implement a ping system to unregister any dead clients.
  - Make sure that events that match multiple filters for the same client only get sent once.
  - When sending information, first check if the socket can actually handle it.
