@@ -21,7 +21,8 @@
    {org.zeromq/jeromq {:mvn/version "0.5.4"}}}
 
   :test
-  {:extra-deps {com.monkeyprojects/build {:mvn/version "0.2.0"}}
+  {:extra-deps {com.monkeyprojects/build {:mvn/version "0.2.0"}
+                ch.qos.logback/logback-classic {:mvn/version "1.4.14"}}
    :exec-fn monkey.test/all}
 
   :junit
