@@ -255,7 +255,24 @@
                     (as-> x (sut/dispatch-event matcher x ::socket ::third {:type ::filter-1} ::raw)))]
       (is (= 1 (count (:replies state))))
       (is (= [0 ::raw] (ffirst (:replies state))) "send event request with raw payload")
-      (is (= [{::socket #{::first}}] (-> state :replies first second))))))
+      (is (= {::socket #{::first}} (-> state :replies first second)))))
+
+  (testing "does not add to replies if no matching listeners"
+    (let [matcher =
+          state (-> {}
+                    (sut/register-client ::socket ::first ::test-filter nil)
+                    (as-> x (sut/dispatch-event matcher x ::socket ::first ::other-filter nil)))]
+      (is (empty? (:replies state)))))
+
+  (testing "only posts replies once when client has multiple matching registrations"
+    (let [matcher (fn [evt ef]
+                    (contains? ef evt))
+          state (-> {}
+                    (sut/register-client ::socket ::id #{:a :b} nil)
+                    (sut/register-client ::socket ::id #{:a} nil)
+                    (as-> x (sut/dispatch-event matcher x ::socket ::id :a nil)))]
+      (is (= [[[0 nil] {::socket #{::id}}]]
+             (:replies state))))))
 
 (deftest unregister-client
   (testing "removes client id from filter, leaves others in place"

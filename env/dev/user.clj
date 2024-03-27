@@ -29,7 +29,7 @@
 (defn broker-server
   ([ef]
    (e/broker-server (z/context) (str "tcp://0.0.0.0:" broker-port)
-                    {:matches-event? ef
+                    {:matches-filter? ef
                      :close-context? true}))
   ([]
    (broker-server (constantly true))))

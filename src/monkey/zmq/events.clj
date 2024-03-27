@@ -56,21 +56,21 @@
    registrations for the same filter."
   [state sock id evt-filter _]
   (log/info "Unregistering client" id "for filter" evt-filter)
-  (let [upd (-> state
-                (update-in [:listeners evt-filter sock] disj id)
-                (update :listeners prune-listeners))]
-    (log/debug "Listeners after unregistering:" (:listeners state))
-    upd))
+  (-> state
+      (update-in [:listeners evt-filter sock] disj id)
+      (update :listeners prune-listeners)))
 
 (defn dispatch-event [matches-filter? state sock id evt raw]
   (log/info "Dispatching event from" id ":" evt)
   ;; Find all socket/id pairs where the event matches the filter
   (let [socket-ids (->> (:listeners state)
                         (filter (comp (partial matches-filter? evt) first))
-                        (map second))]
+                        (map second)
+                        (apply merge-with clojure.set/union))]
     (log/debug "Found" (count socket-ids) "matching socket/ids pairs:" socket-ids)
     ;; TODO Eliminate duplicates (from multiple matching filters)
-    (update state :replies (fnil conj []) [[req-event raw] socket-ids])))
+    (cond-> state
+      (not-empty socket-ids) (update :replies (fnil conj []) [[req-event raw] socket-ids]))))
 
 (defn disconnect-client
   "Handles client disconnect request, by removing it from all registrations."
@@ -109,17 +109,16 @@
   (let [{:keys [replies]} state]
     (when (not-empty replies)
       (log/debug "Posting" (count replies) "outgoing replies")
-      (doseq [[[req e] dest] replies]
-        (doseq [sock-ids dest]
-          (log/debug "Posting to:" (vals sock-ids))
-          (doseq [[sock ids] sock-ids]
-            ;; TODO Only send when socket is able to process the event
-            (doseq [id ids]
-              (z/send-str sock id z/send-more)
-              ;; Send request type
-              (z/send sock (byte-array 1 [req]) z/send-more)
-              ;; Event is raw payload
-              (z/send sock e))))))
+      (doseq [[[req e] sock-ids] replies]
+        (log/debug "Posting to:" sock-ids)
+        (doseq [[sock ids] sock-ids]
+          ;; TODO Only send when socket is able to process the event
+          (doseq [id ids]
+            (z/send-str sock id z/send-more)
+            ;; Send request type
+            (z/send sock (byte-array 1 [req]) z/send-more)
+            ;; Event is raw payload
+            (z/send sock e)))))
     (dissoc state :replies)))
 
 (defn- run-broker-server [{:keys [context addresses running? poll-timeout matches-filter? state-stream
