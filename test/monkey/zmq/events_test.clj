@@ -24,7 +24,7 @@
 (defn- random-addr []
   (str "inproc://" (random-uuid)))
 
-(deftest event-server
+(deftest ^:async event-server
   (testing "passes received events to handler"
     (let [ctx (z/context 1)
           recv (atom [])
@@ -69,7 +69,7 @@
       (is (not= ::timeout (wait-for #(= n (count @recv)))))
       (is (close-all (concat p [e ctx]))))))
 
-(deftest event-broker
+(deftest ^:async event-broker
   (let [opts {:poll-timeout 100 :linger 0}]
 
     (with-open [ctx (z/context 1)]
