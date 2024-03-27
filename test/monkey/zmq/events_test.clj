@@ -235,4 +235,46 @@
       (is (not-empty (:listeners state)))
       (is (empty? (-> state
                       (sut/disconnect-client ::socket ::id {} nil)
-                      :listeners))))))
+                      :listeners)))))
+
+  (testing "leaves other registrations in place"
+    (let [state (-> {}
+                    (sut/register-client ::socket ::first ::first-filter nil)
+                    (sut/register-client ::socket ::second ::second-filter nil)
+                    (sut/disconnect-client ::socket ::first {} nil))]
+      (is (= {::second-filter {::socket #{::second}}}
+             (:listeners state))))))
+
+(deftest dispatch-event
+  (testing "with same socket, adds events to dispatch to replies according to filter"
+    (let [matcher (fn [evt ef]
+                    (= (:type evt) (:type ef)))
+          state (-> {}
+                    (sut/register-client ::socket ::first {:type ::filter-1} nil)
+                    (sut/register-client ::socket ::second {:type ::filter-2} nil)
+                    (as-> x (sut/dispatch-event matcher x ::socket ::third {:type ::filter-1} ::raw)))]
+      (is (= 1 (count (:replies state))))
+      (is (= [0 ::raw] (ffirst (:replies state))) "send event request with raw payload")
+      (is (= [{::socket #{::first}}] (-> state :replies first second))))))
+
+(deftest unregister-client
+  (testing "removes client id from filter, leaves others in place"
+    (let [state (-> {}
+                    (sut/register-client ::socket-a ::first ::first-filter nil)
+                    (sut/register-client ::socket-a ::second ::first-filter nil)
+                    (sut/register-client ::socket-b ::third ::second-filter nil)
+                    (sut/unregister-client ::socket-a ::first ::first-filter nil))]
+      (is (= {::first-filter
+              {::socket-a #{::second}}
+              ::second-filter
+              {::socket-b #{::third}}}
+             (:listeners state)))))
+
+  (testing "prunes listener tree"
+    (let [state (-> {}
+                    (sut/register-client ::socket-a ::first ::first-filter nil)
+                    (sut/register-client ::socket-b ::second ::second-filter nil)
+                    (sut/unregister-client ::socket-a ::first ::first-filter nil))]
+      (is (= {::second-filter
+              {::socket-b #{::second}}}
+             (:listeners state))))))

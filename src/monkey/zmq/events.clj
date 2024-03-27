@@ -2,6 +2,7 @@
   "Functionality for setting up an event server and poster.  This uses ZeroMQ's
    push/pull socket types in the background."
   (:require [clojure.tools.logging :as log]
+            [clojure.walk :as cw]
             [com.stuartsierra.component :as co]
             [manifold.stream :as ms]
             [monkey.zmq.common :as mc]
@@ -38,12 +39,28 @@
   (log/info "Registering client" id "for filter" evt-filter)
   (update-in state [:listeners evt-filter sock] (fnil conj #{}) id))
 
+(defn- prune-listeners
+  "Prunes the tree so all entries with empty values are removed"
+  [l]
+  (cw/postwalk
+   (fn [x]
+     (if (map? x)
+       (->> x
+            (remove (comp empty? second))
+            (into {}))
+       x))
+   l))
+
 (defn unregister-client
   "Removes a client registration from the filter.  It removes the id from the
    registrations for the same filter."
   [state sock id evt-filter _]
   (log/info "Unregistering client" id "for filter" evt-filter)
-  (update-in state [:listeners evt-filter sock] disj id))
+  (let [upd (-> state
+                (update-in [:listeners evt-filter sock] disj id)
+                (update :listeners prune-listeners))]
+    (log/debug "Listeners after unregistering:" (:listeners state))
+    upd))
 
 (defn dispatch-event [matches-filter? state sock id evt raw]
   (log/info "Dispatching event from" id ":" evt)
@@ -51,23 +68,22 @@
   (let [socket-ids (->> (:listeners state)
                         (filter (comp (partial matches-filter? evt) first))
                         (map second))]
-    (log/debug "Found" (count socket-ids) "matching socket/ids pairs")
+    (log/debug "Found" (count socket-ids) "matching socket/ids pairs:" socket-ids)
     ;; TODO Eliminate duplicates (from multiple matching filters)
     (update state :replies (fnil conj []) [[req-event raw] socket-ids])))
 
 (defn disconnect-client
-  "Handles client disconnect request, by removing it from all registrations.
-   A reply is sent back to the client to indicate the request was processed.
-   This allows clients to wait until it has been unregistered."
+  "Handles client disconnect request, by removing it from all registrations."
   [state sock id _ _]
-  (letfn [(remove-from-socket [[f s]]
-            [f (update s sock disj id)])
-          (remove-from-filters [l]
-            (->> (map remove-from-socket l)
-                 (filter (comp empty? second))
+  (letfn [(remove-from-socket [s-ids]
+            (update s-ids sock disj id))
+          (remove-from-filters [[f s]]
+            [f (remove-from-socket s)])
+          (remove-from-listeners [l]
+            (->> (map remove-from-filters l)
                  (into {})))]
     (log/info "Disconnecting client" id)
-    (update state :listeners remove-from-filters)))
+    (update state :listeners (comp prune-listeners remove-from-listeners))))
 
 (defn- handle-incoming
   "Handles incoming request on the broker"
@@ -231,24 +247,32 @@
         check-running
         (fn []
           (and @running?
-               (not (.. Thread currentThread isInterrupted))))]
+               (not (.. Thread currentThread isInterrupted))))
+
+        send-outgoing
+        (fn []
+          (loop [m (take-next)]
+            (when m
+              (send-request m)
+              (recur (take-next)))))
+
+        read-incoming
+        (fn []
+          (z/poll poller poll-timeout)
+          (when (z/check-poller poller 0 :pollin)
+            (receive-evt)))]
     (try
       (reset! running? true)
       (loop [continue? (check-running)]
         ;; Send pending outgoing requests
-        (loop [m (take-next)]
-          (when m
-            (send-request m)
-            (recur (take-next))))
+        (send-outgoing)
         ;; When stopped, add a disconnect request
         (when (not continue?)
           (log/debug "Sending disconnect request")
           (ms/close! stream) ; Stop accepting more requests
           (send-request [req-disconnect {}]))
         ;; Check for incoming data
-        (z/poll poller poll-timeout)
-        (when (z/check-poller poller 0 :pollin)
-          (receive-evt))
+        (read-incoming)
         (when continue?
           (recur (check-running))))
       (catch Exception ex

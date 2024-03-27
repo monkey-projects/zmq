@@ -1,6 +1,7 @@
 (ns user
   (:require [clojure.tools.logging :as log]
             [zeromq.zmq :as z]
+            [manifold.stream :as ms]
             [monkey.zmq
              [events :as e]
              [req :as r]]))
@@ -25,11 +26,22 @@
 
 (def broker-port 3300)
 
-(defn broker-server []
-  (e/broker-server (z/context) (str "tcp://0.0.0.0:" broker-port)
-                   {:matches-event? (constantly true)}))
+(defn broker-server
+  ([ef]
+   (e/broker-server (z/context) (str "tcp://0.0.0.0:" broker-port)
+                    {:matches-event? ef
+                     :close-context? true}))
+  ([]
+   (broker-server (constantly true))))
 
-(defn broker-client []
-  (let [c (e/broker-client (z/context) (str "tcp://127.0.0.1:" broker-port) println)]
-    (e/register c nil)
-    c))
+(defn print-state [bs]
+  (println (deref (ms/take! (:state-stream bs)) 100 :timeout)))
+
+(defn broker-client
+  ([ef]
+   (let [c (e/broker-client (z/context) (str "tcp://127.0.0.1:" broker-port) println
+                            {:close-context? true})]
+     (e/register c ef)
+     c))
+  ([]
+   (broker-client nil)))
