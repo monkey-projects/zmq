@@ -84,7 +84,7 @@
               b (sut/broker-client ctx addr (partial swap! received conj)
                                    (assoc opts :id "client-b"))
               evt {:type :test-event
-                   :message "test event"}]
+                   :message "test event from other client"}]
           (is (some? (sut/register b (:type evt))))
           (is (not= ::timeout (wait-for (fn []
                                           ;; Keep sending events until timeout or one is received
@@ -99,7 +99,7 @@
               server (sut/broker-server ctx addr opts)
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
-                   :message "test event"}]
+                   :message "test event for my own"}]
           ;; Since we're sending and receiving from the same client there is no need to retry
           (is (some? (sut/register client (:type evt))))
           (is (some? (client evt)))
@@ -114,19 +114,19 @@
                                                                                 (= (:type evt) ef))))
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
-                   :message "test event"}]
+                   :message "test event for filtering"}]
           (is (some? (sut/register client :other-type)))
           (is (some? (client evt)))
           (is (= ::timeout (wait-for #(not-empty @received) 200)))
           (is (close-all [client server]))))
 
-      (testing "when mulitiple subscriptions, receive event only once"
+      (testing "when multiple subscriptions, receive event only once"
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr opts)
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
-                   :message "test event"}]
+                   :message "test event for multiople subscriptions"}]
           (is (some? (sut/register client (:type evt))))
           (is (some? (sut/register client (:type evt))))
           (is (some? (client evt)))
@@ -140,7 +140,7 @@
               server (sut/broker-server ctx addr opts)
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
-                   :message "test event"}
+                   :message "test event for unsubscription"}
               ef (:type evt)]
           (is (some? (sut/register client ef)))
           (is (some? (client evt)))
@@ -157,7 +157,7 @@
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               ss (:state-stream server)
               evt {:type :test-event
-                   :message "test event"}
+                   :message "test event for closing"}
               ef (:type evt)
               fs (ms/filter (comp empty? :listeners) ss)]
           (is (some? (sut/register client ef)))
@@ -175,7 +175,7 @@
             server (sut/broker-server ctx addr (assoc opts :close-context? true))
             client (sut/broker-client ctx addr (partial swap! received conj) opts)
             evt {:type :test-event
-                 :message "test event"}
+                 :message "test event for lingering"}
             ef (:type evt)]
         (is (some? (sut/register client ef)))
         (is (some? (client evt)))
@@ -185,7 +185,7 @@
     (testing "can listen on multiple addresses"
       (let [addrs (repeatedly 2 random-addr)
             ctx (z/context 1)
-            opts (assoc opts :context ctx :linger 1000)
+            opts (assoc opts :context ctx)
             received (atom {})
             server (sut/broker-server ctx addrs (assoc opts :close-context? true))
             clients (map (fn [addr]
@@ -208,7 +208,7 @@
     (testing "when multiple addresses, dispatches to the correct registered client"
       (let [addrs (repeatedly 2 random-addr)
             ctx (z/context 1)
-            opts (assoc opts :context ctx :linger 1000)
+            opts (assoc opts :context ctx)
             received (atom {})
             server (sut/broker-server ctx addrs (assoc opts
                                                        :close-context? true
