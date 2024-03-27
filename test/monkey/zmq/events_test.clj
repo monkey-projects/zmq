@@ -1,5 +1,6 @@
 (ns monkey.zmq.events-test
   (:require [clojure.test :refer [deftest testing is]]
+            [clojure.tools.logging :as log]
             [manifold.stream :as ms]
             [monkey.zmq
              [common :refer [close-all]]
@@ -38,7 +39,7 @@
       (is (not= ::timeout (wait-for #(not-empty @recv))))
       (is (= ["test event"] @recv))
       (is (close-all [p e ctx]))))
- 
+  
   (testing "can post multiple events from one source"
     (let [ctx (z/context 1)
           recv (atom [])
