@@ -121,7 +121,7 @@
             (z/send sock e)))))
     (dissoc state :replies)))
 
-(defn- run-broker-server [{:keys [context addresses running? poll-timeout matches-filter? state-stream
+(defn- run-broker-server [{:keys [context addresses stop? poll-timeout matches-filter? state-stream
                                   linger close-context?]
                            :or {poll-timeout 500
                                 linger 0
@@ -155,11 +155,10 @@
           (ms/put! state-stream state)
           state)]
     (try
-      (reset! running? true)
       ;; State keeps track of registered clients
       (loop [state {}]
-        (when (and @running?
-                   (not (.. Thread currentThread isInterrupted)))
+        (when-not (or @stop?
+                      (.. Thread currentThread isInterrupted))
           ;; TODO Auto-unregister dead clients (use a ping system)
           (-> state
               (post-pending)
@@ -170,7 +169,6 @@
         (log/error "Server error:" ex))
       (finally
         (log/debug "Closing server socket")
-        (reset! running? false)
         (z/close socket)
         (ms/close! state-stream)
         (when close-context?
@@ -181,22 +179,23 @@
 (defrecord ThreadComponent [run-fn]
   co/Lifecycle
   (start [this]
-    (let [t (assoc this :running? (atom false))]
+    (let [t (assoc this :stop? (atom false))]
       (assoc t :thread (doto (Thread. #(run-fn t))
                          (.start)))))
   
-  (stop [{:keys [thread running?] :as this}]
-    (when thread
-      (reset! running? false)
-      (.interrupt thread)
-      (.join thread)))
+  (stop [{:keys [thread stop?] :as this}]
+    (if thread
+      (do
+        (reset! stop? true)
+        (.join thread))
+      (log/warn "Not stopping thread component, no thread registered (has it been started?)")))
 
   java.lang.AutoCloseable
   (close [this]
     (co/stop this)))
 
-(defn- component-running? [{:keys [running?]}]
-  (true? (some-> running? deref)))
+(defn- component-running? [{:keys [thread]}]
+  (true? (some-> thread (.isAlive))))
 
 (defn broker-server
   "Starts an event broker that can receive incoming events, but also dispatches outgoing
@@ -218,7 +217,7 @@
   (component-running? s))
 
 (defn- run-sync-client
-  [{:keys [id context address handler stream running? poll-timeout linger close-context?]
+  [{:keys [id context address handler stream stop? poll-timeout linger close-context?]
     :or {poll-timeout 500 linger 0 close-context? false}}]
   ;; Sockets are not thread save so we must use them in the same thread
   ;; where we create them.
@@ -248,10 +247,10 @@
                 (mc/parse-edn)
                 (handler))))
 
-        check-running
+        check-stop
         (fn []
-          (and @running?
-               (not (.. Thread currentThread isInterrupted))))
+          (or @stop?
+              (.. Thread currentThread isInterrupted)))
 
         send-outgoing
         (fn []
@@ -266,24 +265,22 @@
           (when (z/check-poller poller 0 :pollin)
             (receive-evt)))]
     (try
-      (reset! running? true)
-      (loop [continue? (check-running)]
+      (loop [s? (check-stop)]
         ;; Send pending outgoing requests
         (send-outgoing)
         ;; When stopped, add a disconnect request
-        (when (not continue?)
+        (when s?
           (log/debug "Sending disconnect request")
           (ms/close! stream)            ; Stop accepting more requests
           (send-request [req-disconnect {}]))
         ;; Check for incoming data
         (read-incoming)
-        (when continue?
-          (recur (check-running))))
+        (when-not s?
+          (recur (check-stop))))
       (catch Exception ex
         (log/error "Socket error:" ex))
       (finally
         (log/debug "Closing client socket")
-        (reset! running? false)
         (z/close socket)
         (when close-context?
           (log/debug "Closing client context")
@@ -307,18 +304,21 @@
   (start [this]
     (log/info "Connecting client to" (:address component))
     (assoc this
+           :started? true
            :component
            (-> component
                (assoc :run-fn run-sync-client
                       :stream (ms/stream))
                (co/start))))
   
-  (stop [{:keys [component] :as this}]
-    (if (component-running? component)
+  (stop [{:keys [component started?] :as this}]
+    (if started?
       (do 
         (log/debug "Stopping client" (:id component))
         (assoc this :component (co/stop component)))
-      this))
+      (do
+        (log/warn "Unable to stop client, it's not started:" this)
+        this)))
 
   clojure.lang.IFn
   (invoke [this evt]

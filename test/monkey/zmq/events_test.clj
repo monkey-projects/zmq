@@ -184,67 +184,67 @@
           (is (nil? (.close server))))))
 
     (testing "setting linger will block context closing until all has been sent"
-      (let [addr (random-addr)
-            ctx (z/context 1)
-            opts (assoc opts :context ctx :linger 1000)
-            received (atom [])
-            server (sut/broker-server ctx addr (assoc opts :close-context? true))
-            client (sut/broker-client ctx addr (partial swap! received conj) opts)
-            evt {:type :test-event
-                 :message "test event for lingering"}
-            ef (:type evt)]
-        (is (some? (sut/register client ef)))
-        (is (some? (client evt)))
-        (is (close-all [client server]))
-        (is (not= ::timeout (wait-for #(not-empty @received))))))
+      (with-open [ctx (z/context 1)]
+        (let [addr (random-addr)
+              opts (assoc opts :context ctx :linger 1000)
+              received (atom [])
+              server (sut/broker-server ctx addr (assoc opts :close-context? true))
+              client (sut/broker-client ctx addr (partial swap! received conj) opts)
+              evt {:type :test-event
+                   :message "test event for lingering"}
+              ef (:type evt)]
+          (is (some? (sut/register client ef)))
+          (is (some? (client evt)))
+          (is (close-all [client server]))
+          (is (not= ::timeout (wait-for #(not-empty @received)))))))
 
     (testing "can listen on multiple addresses"
-      (let [addrs (repeatedly 2 random-addr)
-            ctx (z/context 1)
-            opts (assoc opts :context ctx)
-            received (atom {})
-            server (sut/broker-server ctx addrs (assoc opts :close-context? true))
-            clients (map (fn [addr]
-                           (sut/broker-client ctx addr (partial swap! received update addr (fnil conj [])) opts))
-                         addrs)
-            evt {:type ::test-type}
-            a (assoc evt :message "first event")
-            b (assoc evt :message "second event")
-            ef (:type evt)]
-        (is (some? (sut/register (first clients) ef)))
-        (is (some? (sut/register (second clients) ef)))
-        (is (some? ((first clients) a)))
-        (is (some? ((second clients) b)))
-        (is (not= ::timeout (wait-for #(and (not-empty @received)
-                                            (every? (comp (partial = 2) count) (vals @received))))))
-        (is (close-all (concat clients [server])))
-        (is (= #{a b} (-> @received (get (first addrs)) set)))
-        (is (= #{a b} (-> @received (get (second addrs)) set)))))
+      (with-open [ctx (z/context 1)]
+        (let [addrs (repeatedly 2 random-addr)
+              opts (assoc opts :context ctx)
+              received (atom {})
+              server (sut/broker-server ctx addrs (assoc opts :close-context? true))
+              clients (map (fn [addr]
+                             (sut/broker-client ctx addr (partial swap! received update addr (fnil conj [])) opts))
+                           addrs)
+              evt {:type ::test-type}
+              a (assoc evt :message "first event")
+              b (assoc evt :message "second event")
+              ef (:type evt)]
+          (is (some? (sut/register (first clients) ef)))
+          (is (some? (sut/register (second clients) ef)))
+          (is (some? ((first clients) a)))
+          (is (some? ((second clients) b)))
+          (is (not= ::timeout (wait-for #(and (not-empty @received)
+                                              (every? (comp (partial = 2) count) (vals @received))))))
+          (is (close-all (concat clients [server])))
+          (is (= #{a b} (-> @received (get (first addrs)) set)))
+          (is (= #{a b} (-> @received (get (second addrs)) set))))))
 
     (testing "when multiple addresses, dispatches to the correct registered client"
-      (let [addrs (repeatedly 2 random-addr)
-            ctx (z/context 1)
-            opts (assoc opts :context ctx)
-            received (atom {})
-            server (sut/broker-server ctx addrs (assoc opts
-                                                       :close-context? true
-                                                       :matches-filter? (fn [evt ef]
-                                                                          (= (:type evt) ef))))
-            clients (map (fn [addr]
-                           (sut/broker-client ctx addr (partial swap! received update addr (fnil conj [])) opts))
-                         addrs)
-            a {:type ::first-type}
-            b {:type ::second-type}]
-        (is (some? (sut/register (first clients) ::first-type)))
-        (is (some? (sut/register (second clients) ::second-type)))
-        (is (some? ((first clients) b)))
-        (is (some? ((second clients) a)))
-        (is (not= ::timeout (wait-for #(and (not-empty @received)
-                                            (every? not-empty (vals @received))))))
-        (is (close-all (concat clients [server])))
-        (is (= {(first addrs) [a]
-                (second addrs) [b]}
-               @received))))))
+      (with-open [ctx (z/context 1)]
+        (let [addrs (repeatedly 2 random-addr)
+              opts (assoc opts :context ctx)
+              received (atom {})
+              server (sut/broker-server ctx addrs (assoc opts
+                                                         :close-context? true
+                                                         :matches-filter? (fn [evt ef]
+                                                                            (= (:type evt) ef))))
+              clients (map (fn [addr]
+                             (sut/broker-client ctx addr (partial swap! received update addr (fnil conj [])) opts))
+                           addrs)
+              a {:type ::first-type}
+              b {:type ::second-type}]
+          (is (some? (sut/register (first clients) ::first-type)))
+          (is (some? (sut/register (second clients) ::second-type)))
+          (is (true? @((first clients) b)))
+          (is (true? @((second clients) a)))
+          (is (not= ::timeout (wait-for #(and (= 2 (count @received))
+                                              (every? not-empty (vals @received))))))
+          (is (close-all (concat clients [server])))
+          (is (= {(first addrs) [a]
+                  (second addrs) [b]}
+                 @received)))))))
 
 (deftest disconnect-client
   (testing "removes client registrations from state"
