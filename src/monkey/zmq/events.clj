@@ -169,10 +169,12 @@
       (catch Exception ex
         (log/error "Server error:" ex))
       (finally
+        (log/debug "Closing server socket")
         (reset! running? false)
         (z/close socket)
         (ms/close! state-stream)
         (when close-context?
+          (log/debug "Closing server context")
           (.close context))))
     (log/info "Server terminated")))
 
@@ -211,6 +213,9 @@
                                        :state-stream (ms/sliding-stream 1)
                                        :run-fn run-broker-server))
     autostart? (co/start)))
+
+(defn server-running? [s]
+  (component-running? s))
 
 (defn- run-sync-client
   [{:keys [id context address handler stream running? poll-timeout linger close-context?]
@@ -268,7 +273,7 @@
         ;; When stopped, add a disconnect request
         (when (not continue?)
           (log/debug "Sending disconnect request")
-          (ms/close! stream) ; Stop accepting more requests
+          (ms/close! stream)            ; Stop accepting more requests
           (send-request [req-disconnect {}]))
         ;; Check for incoming data
         (read-incoming)
@@ -277,9 +282,11 @@
       (catch Exception ex
         (log/error "Socket error:" ex))
       (finally
+        (log/debug "Closing client socket")
         (reset! running? false)
         (z/close socket)
         (when close-context?
+          (log/debug "Closing client context")
           (.close context))))
     (log/info "Client" id "terminated")))
 
@@ -332,6 +339,9 @@
           (merge opts)
           (->BrokerClient))
     autostart? (co/start)))
+
+(defn client-running? [c]
+  (component-running? (:component c)))
 
 (defn register
   "Registers the client to receive events matching the filter.  A client can

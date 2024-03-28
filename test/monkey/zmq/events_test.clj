@@ -73,9 +73,20 @@
 (deftest ^:async event-broker
   (let [opts {:poll-timeout 100 :linger 0}]
 
-    (with-open [ctx (z/context 1)]
-      
-      (testing "clients receive events sent by other clients"
+    (testing "server is running after start"
+      (with-open [ctx (z/context 1)]
+        (let [server (sut/broker-server ctx (random-addr) opts)]
+          (is (not= ::timeout (wait-for #(sut/server-running? server))))
+          (is (nil? (.close server))))))
+
+    (testing "client is running after start"
+      (with-open [ctx (z/context 1)]
+        (let [client (sut/broker-client ctx (random-addr) (constantly nil) opts)]
+          (is (not= ::timeout (wait-for #(sut/client-running? client))))
+          (is (nil? (.close client))))))
+
+    (testing "clients receive events sent by other clients"
+      (with-open [ctx (z/context 1)]
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr opts)
@@ -91,9 +102,10 @@
                                           (a evt)
                                           (not-empty @received)))))
           (is (= evt (first @received)))
-          (is (close-all [a b server]))))
+          (is (close-all [a b server])))))
 
-      (testing "clients receive their own events"
+    (testing "clients receive their own events"
+      (with-open [ctx (z/context 1)]
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr opts)
@@ -105,9 +117,10 @@
           (is (some? (client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= evt (first @received)))
-          (is (close-all [client server]))))
+          (is (close-all [client server])))))
 
-      (testing "clients don't receive events not allowed by filter"
+    (testing "clients don't receive events not allowed by filter"
+      (with-open [ctx (z/context 1)]
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr (assoc opts :matches-filter? (fn [evt ef]
@@ -118,9 +131,10 @@
           (is (some? (sut/register client :other-type)))
           (is (some? (client evt)))
           (is (= ::timeout (wait-for #(not-empty @received) 200)))
-          (is (close-all [client server]))))
+          (is (close-all [client server])))))
 
-      (testing "when multiple subscriptions, receive event only once"
+    (testing "when multiple subscriptions, receive event only once"
+      (with-open [ctx (z/context 1)]
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr opts)
@@ -132,9 +146,10 @@
           (is (some? (client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= [evt] @received))
-          (is (close-all [client server]))))
+          (is (close-all [client server])))))
 
-      (testing "clients can unsubscribe"
+    (testing "clients can unsubscribe"
+      (with-open [ctx (z/context 1)]
         (let [addr (random-addr)
               received (atom [])
               server (sut/broker-server ctx addr opts)
@@ -148,25 +163,25 @@
           (is (some? (client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= [evt] @received) "Only one received event was expected")
-          (is (close-all [client server]))))
+          (is (close-all [client server])))))
 
-      ;; Blocks in ci/cd
-      #_(testing "when client closes, unregisters from all"
-          (let [addr (random-addr)
-                received (atom [])
-                server (sut/broker-server ctx addr opts)
-                client (sut/broker-client ctx addr (partial swap! received conj) opts)
-                ss (:state-stream server)
-                evt {:type :test-event
-                     :message "test event for closing"}
-                ef (:type evt)
-                fs (ms/filter (comp empty? :listeners) ss)]
-            (is (some? (sut/register client ef)))
-            (is (some? (client evt)))
-            (is (nil? (.close client)))
-            (let [state (deref (ms/take! ss) 1000 :timeout)]
-              (is (not= ::timeout state)))
-            (is (nil? (.close server))))))
+    (testing "when client closes, unregisters from all"
+      (with-open [ctx (z/context 1)]
+        (let [addr (random-addr)
+              received (atom [])
+              server (sut/broker-server ctx addr opts)
+              client (sut/broker-client ctx addr (partial swap! received conj) opts)
+              ss (:state-stream server)
+              evt {:type :test-event
+                   :message "test event for closing"}
+              ef (:type evt)
+              fs (ms/filter (comp empty? :listeners) ss)]
+          (is (some? (sut/register client ef)))
+          (is (some? (client evt)))
+          (is (nil? (.close client)))
+          (let [state (deref (ms/take! ss) 1000 :timeout)]
+            (is (not= ::timeout state)))
+          (is (nil? (.close server))))))
 
     (testing "setting linger will block context closing until all has been sent"
       (let [addr (random-addr)
