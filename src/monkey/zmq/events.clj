@@ -155,6 +155,7 @@
           (ms/put! state-stream state)
           state)]
     (try
+      (log/info "Starting event broker server at addresses:" addresses)
       ;; State keeps track of registered clients
       (loop [state {}]
         (when-not (or @stop?
