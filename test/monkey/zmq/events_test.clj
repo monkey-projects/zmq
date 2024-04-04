@@ -96,10 +96,10 @@
                                    (assoc opts :id "client-b"))
               evt {:type :test-event
                    :message "test event from other client"}]
-          (is (some? (sut/register b (:type evt))))
+          (is (some? @(sut/register b (:type evt))))
           (is (not= ::timeout (wait-for (fn []
                                           ;; Keep sending events until timeout or one is received
-                                          (a evt)
+                                          @(a evt)
                                           (not-empty @received)))))
           (is (= evt (first @received)))
           (is (close-all [a b server])))))
@@ -113,8 +113,8 @@
               evt {:type :test-event
                    :message "test event for my own"}]
           ;; Since we're sending and receiving from the same client there is no need to retry
-          (is (some? (sut/register client (:type evt))))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client (:type evt))))
+          (is (some? @(client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= evt (first @received)))
           (is (close-all [client server])))))
@@ -128,8 +128,8 @@
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
                    :message "test event for filtering"}]
-          (is (some? (sut/register client :other-type)))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client :other-type)))
+          (is (some? @(client evt)))
           (is (= ::timeout (wait-for #(not-empty @received) 200)))
           (is (close-all [client server])))))
 
@@ -141,9 +141,9 @@
               client (sut/broker-client ctx addr (partial swap! received conj) opts)
               evt {:type :test-event
                    :message "test event for multiople subscriptions"}]
-          (is (some? (sut/register client (:type evt))))
-          (is (some? (sut/register client (:type evt))))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client (:type evt))))
+          (is (some? @(sut/register client (:type evt))))
+          (is (some? @(client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= [evt] @received))
           (is (close-all [client server])))))
@@ -157,10 +157,10 @@
               evt {:type :test-event
                    :message "test event for unsubscription"}
               ef (:type evt)]
-          (is (some? (sut/register client ef)))
-          (is (some? (client evt)))
-          (is (some? (sut/unregister client ef)))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client ef)))
+          (is (some? @(client evt)))
+          (is (some? @(sut/unregister client ef)))
+          (is (some? @(client evt)))
           (is (not= ::timeout (wait-for #(not-empty @received))))
           (is (= [evt] @received) "Only one received event was expected")
           (is (close-all [client server])))))
@@ -176,8 +176,8 @@
                    :message "test event for closing"}
               ef (:type evt)
               fs (ms/filter (comp empty? :listeners) ss)]
-          (is (some? (sut/register client ef)))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client ef)))
+          (is (some? @(client evt)))
           (is (nil? (.close client)))
           (let [state (deref (ms/take! ss) 1000 :timeout)]
             (is (not= ::timeout state)))
@@ -193,8 +193,8 @@
               evt {:type :test-event
                    :message "test event for lingering"}
               ef (:type evt)]
-          (is (some? (sut/register client ef)))
-          (is (some? (client evt)))
+          (is (some? @(sut/register client ef)))
+          (is (some? @(client evt)))
           (is (close-all [client server]))
           (is (not= ::timeout (wait-for #(not-empty @received)))))))
 
@@ -211,8 +211,7 @@
               a (assoc evt :message "first event")
               b (assoc evt :message "second event")
               ef (:type evt)]
-          (is (some? (sut/register (first clients) ef)))
-          (is (some? (sut/register (second clients) ef)))
+          (is (every? some? (map (comp deref #(sut/register % ef)) clients)))
           (is (some? ((first clients) a)))
           (is (some? ((second clients) b)))
           (is (not= ::timeout (wait-for #(and (not-empty @received)
@@ -235,8 +234,8 @@
                            addrs)
               a {:type ::first-type}
               b {:type ::second-type}]
-          (is (some? (sut/register (first clients) ::first-type)))
-          (is (some? (sut/register (second clients) ::second-type)))
+          (is (some? @(sut/register (first clients) ::first-type)))
+          (is (some? @(sut/register (second clients) ::second-type)))
           (is (true? @((first clients) b)))
           (is (true? @((second clients) a)))
           (is (not= ::timeout (wait-for #(and (= 2 (count @received))

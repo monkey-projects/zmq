@@ -31,6 +31,7 @@
 (def req-register 1)
 (def req-unregister 2)
 (def req-disconnect 3)
+(def req-register-ack 4) ; Acknowledge client registration
 
 (defn register-client
   "Registers a new client with filter in the state.  The client is identified by the
@@ -68,7 +69,6 @@
                         (map second)
                         (apply merge-with clojure.set/union))]
     (log/debug "Found" (count socket-ids) "matching socket/ids pairs:" socket-ids)
-    ;; TODO Eliminate duplicates (from multiple matching filters)
     (cond-> state
       (not-empty socket-ids) (update :replies (fnil conj []) [[req-event raw] socket-ids]))))
 
@@ -220,7 +220,7 @@
 (defn- run-sync-client
   [{:keys [id context address handler stream stop? poll-timeout linger close-context?]
     :or {poll-timeout 500 linger 0 close-context? false}}]
-  ;; Sockets are not thread save so we must use them in the same thread
+  ;; Sockets are not thread safe so we must use them in the same thread
   ;; where we create them.
   (let [socket (doto (z/socket context :dealer)
                  (z/set-identity (.getBytes id))
@@ -239,14 +239,16 @@
 
         receive-evt
         (fn []
-          (log/debug "Received events at" id)
-          (let [[_ recv] (z/receive-all socket)]
-            ;; TODO Instead of passing all events to a single handler, allow a handler per
-            ;; registered event filter.  This would mean the broker will have to send back
-            ;; the filter (or some id?) that passed the event.
-            (-> recv
-                (mc/parse-edn)
-                (handler))))
+          (log/debug "Received messages at" id)
+          (let [[req recv] (z/receive-all socket)]
+            (let [req (aget req 0)]
+              (when (= req-event req)
+                ;; TODO Instead of passing all events to a single handler, allow a handler per
+                ;; registered event filter.  This would mean the broker will have to send back
+                ;; the filter (or some id?) that passed the event.
+                (-> recv
+                    (mc/parse-edn)
+                    (handler))))))
 
         check-stop
         (fn []
