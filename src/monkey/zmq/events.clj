@@ -31,7 +31,7 @@
 (def req-register 1)
 (def req-unregister 2)
 (def req-disconnect 3)
-(def req-register-ack 4) ; Acknowledge client registration
+;;(def req-register-ack 4) ; Acknowledge client registration
 
 (defn register-client
   "Registers a new client with filter in the state.  The client is identified by the
@@ -286,7 +286,7 @@
         (log/debug "Closing client socket")
         (z/close socket)
         (when close-context?
-          (log/debug "Closing client context")
+          (log/debug "Closing client context (linger:" linger ")")
           (.close context))))
     (log/info "Client" id "terminated")))
 
